@@ -1,5 +1,11 @@
 # Adding USGS channel measurements to RiverShapeML
 
+**More USGS measurements cut held-out median error in small streams (under 10 km²) from 78% to 41% for width and
+from 72% to 32% for depth.** Those streams make up 58% of NHDPlus reaches and have the fewest training sites. Between
+100 and 10,000 km², the national product stays within about 10% of the current model.
+
+Independent work, not affiliated with or endorsed by Lynker, NOAA or the RiverShapeML authors.
+
 RiverShapeML predicts bankfull width and depth for all ~2.65 million NHDPlus reaches in CONUS, from a model
 trained on HYDRoSWOT (USGS acoustic Doppler measurements through 2014). USGS now publishes every channel
 measurement it makes, by every method, through its Water Data OGC API (4.77 million records). This repository
@@ -9,7 +15,7 @@ fixed, and re-predicts the national product with 90% prediction intervals.
 - **Short memo (2 pages):** [memo/memo_short.pdf](memo/memo_short.pdf)
 - **Long form:** [memo/memo_long.pdf](memo/memo_long.pdf)
 - **Interactive notebook:** [notebooks/explore.py](notebooks/explore.py) (marimo)
-- **Data product:** [v1.0 release](https://github.com/drmerlot/rivershapeml-more-data/releases/tag/v1.0): bankfull width and depth with 90% prediction intervals for all
+- **Data product:** [v1.0 release](https://github.com/northlinehydrology/rivershapeml-more-data/releases/tag/v1.0): bankfull width and depth with 90% prediction intervals for all
   2,647,454 reaches (`rivershapeml_expanded_set_v1.parquet`, 38 MB)
 
 Everything uses public data and runs on a laptop.
@@ -19,11 +25,14 @@ Everything uses public data and runs on a laptop.
 This work stands on **RiverShapeML** by Arash Modaresi Rad and colleagues (Modaresi Rad et al., 2024,
 *JGR: Machine Learning and Computation*; [lynker-spatial/RiverShapeML](https://github.com/lynker-spatial/RiverShapeML)).
 It was possible because the model's deployment pipeline, **[NOAA-OWP/predict-riverML](https://github.com/NOAA-OWP/predict-riverML)**,
-is public. Its inputs for every reach, feature engineering and trained models reproduce the deployed bankfull
+is public. Its inputs for every reach, derived features and trained models reproduce the deployed bankfull
 width and depth exactly: on the same reaches, the published output statistics match to six decimals. Every
 experiment here therefore runs on the model's own features and pipeline. Hydraulic-geometry fits use
 **[AHGestimation](https://github.com/mikejohnson51/AHGestimation)** by Mike Johnson (NOAA OWP), with
 contributions from Arash Modaresi Rad.
+
+This repository is MIT-licensed, except that `src/riverml_pipeline.py` adapts data-loading and inference code from
+predict-riverML (Apache-2.0), with model settings changed as described below. RiverShapeML and AHGestimation are MIT.
 
 ## Results
 
@@ -154,7 +163,7 @@ python memo/make_figures.py && python memo/build_pdf.py memo/memo_short.md   # m
 ```
 
 Data and outputs go to `data/`, which is not tracked. `run_all.sh` regenerates the re-predicted product and its
-release file (`data/derived/release/rivershapeml_expanded_set_v1.parquet`, published with the [v1.0 release](https://github.com/drmerlot/rivershapeml-more-data/releases/tag/v1.0)).
+release file (`data/derived/release/rivershapeml_expanded_set_v1.parquet`, published with the [v1.0 release](https://github.com/northlinehydrology/rivershapeml-more-data/releases/tag/v1.0)).
 
 ## Layout
 

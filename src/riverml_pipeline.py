@@ -1,4 +1,4 @@
-"""RiverShapeML deployment pipeline (NOAA-OWP/predict-riverML), reproduced for reuse.
+"""RiverShapeML deployment pipeline (NOAA-OWP/predict-riverML, Apache-2.0), adapted for reuse.
 
 Mirrors their data_loader.py / inference.py: fill missing values with the saved training medians,
 engineer features, select the model's feature list (in order), and predict log1p(target) with XGBoost.
