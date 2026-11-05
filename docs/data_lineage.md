@@ -430,11 +430,11 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  ahg_fits["AHG fits per site and data set<br/>20,463 rows"]:::table
-  ahg_input["AHG input (measurements in SI, after sanity rules)<br/>1,544,309 rows"]:::table
+  ahg_fits["AHG fits per site and data set<br/>20,473 rows"]:::table
+  ahg_input["AHG input (measurements in SI, after sanity rules)<br/>1,642,146 rows"]:::table
   hydroswot["HYDRoSWOT, RiverShapeML's copy<br/>223,022 rows<br/><i>from A</i>"]:::external
   retrain_sites["Site list (gage -&gt; reach, existing or new)<br/>10,308 rows<br/><i>from B</i>"]:::external
-  targets["Targets (bankfull width and depth per site)<br/>8,904 rows"]:::table
+  targets["Targets (bankfull and in-channel width and depth per site)<br/>10,029 rows"]:::table
   usgs_channel_measurements["USGS channel measurements (national)<br/>4,772,063 rows<br/><i>from A</i>"]:::external
   usgs_peaks["USGS annual peak streamflow<br/>837,910 rows<br/><i>from A</i>"]:::external
   op_clean_convert(["Clean and convert"]):::op
@@ -449,7 +449,7 @@ flowchart TD
   op_two_year_flood(["2-year flood"]):::op
   usgs_peaks --> op_two_year_flood
   op_two_year_flood --> targets
-  op_read_and_filter(["Read at Q2 and filter"]):::op
+  op_read_and_filter(["Read at Q2 and Q_in, and filter"]):::op
   ahg_fits --> op_read_and_filter
   ahg_input --> op_read_and_filter
   op_read_and_filter --> targets
@@ -463,7 +463,7 @@ flowchart TD
 #### AHG input (measurements in SI, after sanity rules) (`ahg_input`)
 
 - **Path:** `data/derived/ahg_input.parquet`
-- **Rows:** 1,544,309
+- **Rows:** 1,642,146
 - **Grain:** one measurement at a site with a reach and a 2-year flood
 - **Key:** site_no, set, row
 - **Source / provenance:**
@@ -478,7 +478,7 @@ flowchart TD
 #### AHG fits per site and data set (`ahg_fits`)
 
 - **Path:** `data/derived/ahg_fits.parquet`
-- **Rows:** 20,463
+- **Rows:** 20,473
 - **Grain:** one site x data set (all, hs)
 - **Key:** site_no, set
 - **Source / provenance:**
@@ -495,22 +495,25 @@ flowchart TD
   - `viable`: bool; meets continuity (a c k ~ 1, b + f + m ~ 1) within 5%
   - `error`: text; why a fit failed (e.g. < 5 measurements after filtering)
 
-#### Targets (bankfull width and depth per site) (`targets`)
+#### Targets (bankfull and in-channel width and depth per site) (`targets`)
 
 - **Path:** `data/derived/retrain_targets.csv`
-- **Rows:** 8,904
+- **Rows:** 10,029
 - **Grain:** one gage
 - **Key:** site_no
 - **Source / provenance:**
   - **script:** src/build_targets.py
 - **Columns:**
-  - `q2`: ft3/s; 2-year flood
-  - `n_peaks`: count; annual peaks
+  - `q2`: ft3/s; 2-year flood (median annual peak, water years 2000+)
+  - `q_in`: ft3/s; in-channel flow (smallest annual peak, water years 2000+)
+  - `n_peaks`: count; annual peaks, water years 2000+
   - `tw_all`: ft; bankfull width, all measurements (null if filtered out)
   - `td_all`: ft; bankfull mean depth, all measurements
   - `tw_hs`: ft; bankfull width, HYDRoSWOT only
-  - `se_all / se_d_all / se_hs`: log units; standard error of the log target at Q2
-  - `ext_all / ext_d_all / ext_hs`: -; Q2 / largest measured flow
+  - `td_hs`: ft; bankfull mean depth, USGS records of the HYDRoSWOT visits
+  - `tw_in_all / td_in_all / tw_in_hs / td_in_hs`: ft; the same four targets at the in-channel flow (kept only if below bankfull)
+  - `se_all / se_d_all / se_hs / se_d_hs, se_tw_in_all ...`: log units; standard error of the log target at the evaluation flow
+  - `ext_all / ext_d_all / ext_hs / ext_d_hs, ext_tw_in_all ...`: -; extrapolation factor beyond the measured flow range
   - `r2_all / r2_d_all / r2_hs`: -; R2 around the curve (paper's rule, recorded only)
   - `tw_all_exp / td_all_exp`: -; fitted exponents b, f
   - `dropped_inverse_depth`: bool; site dropped because depth falls as flow rises
@@ -544,18 +547,21 @@ flowchart TD
 - **In:** `usgs_peaks`
 - **Out:** `targets`
 - **Math:**
+  - annual peaks: water years >= 2000; drop LESSTHAN, GREATERTHAN, DAMFAILURE; one (the largest) per water year
   - Q2 = median(annual peaks) if >= 10 peaks (the median annual flood = 2-year flood on the annual-maximum basis)
+  - Q_in = min(annual peaks): the 1-year (always exceeded) flood, RiverShapeML's in-channel convention
 
-#### Read at Q2 and filter (`read_and_filter`)
+#### Read at Q2 and Q_in, and filter (`read_and_filter`)
 
 - **Script:** `src/build_targets.py (curve_stats)`
 - **In:** `ahg_fits`, `ahg_input`
 - **Out:** `targets`
 - **Math:**
-  - W_bf = a Q2^b; D_bf = c Q2^f (SI), stored in ft (/ 0.3048)
+  - W_bf = a Q2^b; D_bf = c Q2^f; W_in = a Q_in^b; D_in = c Q_in^f (SI), stored in ft (/ 0.3048)
   - r = ln(v) - ln(curve); trim |r - median r| > 3 x 1.4826 MAD
   - SE = s sqrt(1/n + (ln Q2 - mean ln Q)^2 / sum (ln Q - mean ln Q)^2), s = sqrt(sum r^2 / (n - 2))
-  - keep if n >= 5, SE <= 0.2, Q2 / max Q <= 3; drop the site if f < 0
+  - keep if n >= 5, SE <= 0.2, extrapolation <= 3x (Q / max Q and min Q / Q); drop the site if f < 0
+  - in-channel targets kept only if smaller than the bankfull target
 
 ## D. Data checks
 
@@ -679,9 +685,9 @@ flowchart TD
   ml_inputs["RiverShapeML deployment inputs (ml_inputs)<br/>2,647,454 rows<br/><i>from A</i>"]:::external
   riverml_feature_lists["RiverShapeML model feature lists<br/>3 rows<br/><i>from A</i>"]:::external
   riverml_fill_medians["RiverShapeML fill-in medians<br/>478 rows<br/><i>from A</i>"]:::external
-  riverml_runs["Held-out predictions, current model's setup (width and depth)<br/>125,262 rows"]:::table
-  targets["Targets (bankfull width and depth per site)<br/>8,904 rows<br/><i>from C</i>"]:::external
-  train_eval["Train / validation / test diagnostics (width and depth)<br/>18,820 rows"]:::table
+  riverml_runs["Held-out predictions, current model's setup (width and depth)<br/>259,065 rows"]:::table
+  targets["Targets (bankfull and in-channel width and depth per site)<br/>10,029 rows<br/><i>from C</i>"]:::external
+  train_eval["Train / validation / test diagnostics (width and depth)<br/>19,395 rows"]:::table
   training_table["Training table (targets joined to the current model's features)<br/>not stored"]:::table
   tuning["Regularization sweep with early stopping (width and depth)<br/>68 rows"]:::table
   op_engineer_join(["Engineer features and join"]):::op
@@ -722,7 +728,7 @@ flowchart TD
 #### Held-out predictions, current model's setup (width and depth) (`riverml_runs`)
 
 - **Path:** `data/derived/runs/riverml_*/predictions.parquet`
-- **Rows:** 125,262
+- **Rows:** 259,065
 - **Grain:** one held-out site x repeat (seed) x variant
 - **Key:** site_no, seed, variant
 - **Source / provenance:**
@@ -737,7 +743,7 @@ flowchart TD
 #### Train / validation / test diagnostics (width and depth) (`train_eval`)
 
 - **Path:** `data/derived/training/*/*`
-- **Rows:** 18,820
+- **Rows:** 19,395
 - **Grain:** curves = one boosting round; predictions = one site; metrics = one split
 - **Key:** target, split
 - **Source / provenance:**
@@ -778,7 +784,8 @@ flowchart TD
 - **Out:** `riverml_runs`
 - **Math:**
   - 5 folds grouped by COMID x 3 repeats; XGBRegressor with MODEL_PARAMS (regularized, early-stopped deployed settings)
-  - A: existing sites, tw_hs; B1: existing, tw_all; B2: existing + new, tw_all; all scored on the same held-out sites
+  - A: existing sites, HYDRoSWOT targets; B1: existing, all-measurement targets; B2: existing + new; all scored on the same held-out sites
+  - run for TW_bf, Y_bf, TW_in, Y_in (in-channel models use the bankfull models' inputs and settings)
 
 #### Train / validation / test (`train_valid_test`)
 
@@ -816,8 +823,8 @@ flowchart TD
   riverml_feature_lists["RiverShapeML model feature lists<br/>3 rows<br/><i>from A</i>"]:::external
   riverml_fill_medians["RiverShapeML fill-in medians<br/>478 rows<br/><i>from A</i>"]:::external
   riverml_models["RiverShapeML deployed models and model files<br/>3 rows<br/><i>from A</i>"]:::external
-  riverml_runs["Held-out predictions, current model's setup (width and depth)<br/>125,262 rows<br/><i>from E</i>"]:::external
-  targets["Targets (bankfull width and depth per site)<br/>8,904 rows<br/><i>from C</i>"]:::external
+  riverml_runs["Held-out predictions, current model's setup (width and depth)<br/>259,065 rows<br/><i>from E</i>"]:::external
+  targets["Targets (bankfull and in-channel width and depth per site)<br/>10,029 rows<br/><i>from C</i>"]:::external
   training_table["Training table (targets joined to the current model's features)<br/>not stored<br/><i>from E</i>"]:::external
   usgs_channel_measurements["USGS channel measurements (national)<br/>4,772,063 rows<br/><i>from A</i>"]:::external
   op_run_current_model(["Run the current model on every reach"]):::op
@@ -876,8 +883,8 @@ flowchart TD
   - **script:** src/predict_product.py
 - **Columns:**
   - `tw_bf_m / y_bf_m`: m; bankfull width / depth
-  - `tw_bf_m_p05 / tw_bf_m_p95`: m; 90% prediction interval for width
-  - `y_bf_m_p05 / y_bf_m_p95`: m; 90% prediction interval for depth
+  - `tw_in_m / y_in_m`: m; in-channel width / depth (capped at the bankfull value)
+  - `*_p05 / *_p95`: m; 90% prediction interval for each
   - `da_bin`: text; drainage-area class used for the interval
   - `streamorde`: -; stream order
 
@@ -907,16 +914,16 @@ flowchart TD
 
 #### Release file, ML-derived channel width and depth (expanded-set retrain) (`product_release`)
 
-- **Path:** `data/derived/release/rivershapeml_expanded_set_v1.parquet`
+- **Path:** `data/derived/release/rivershapeml_expanded_set_v2.parquet`
 - **Rows:** 2,647,454
 - **Grain:** one reach
-- **Key:** comid
+- **Key:** hf_id
 - **Source / provenance:**
   - **script:** src/export_product.py
 - **Columns:**
-  - `comid`: integer; NHDPlusV2 COMID
-  - `tw_bf_m, tw_bf_m_p05, tw_bf_m_p95`: m; bankfull width and its 90% prediction interval (NaN where drainage area is zero or missing)
-  - `y_bf_m, y_bf_m_p05, y_bf_m_p95`: m; bankfull mean depth and its 90% prediction interval
+  - `hf_id, hf_source`: integer reach ID (= NHDPlusV2 COMID) and 'reference_fabric', as in the 2024 release
+  - `y_bf(m), y_inchan(m), tw_bf(m), tw_inchan(m)`: m; bankfull and in-channel depth and width (names as in the 2024 release)
+  - `*_p05(m) / *_p95(m)`: m; 90% prediction interval for each (NaN where drainage area is zero or missing)
 
 #### Notebook measurement cache (`measurement_cache`)
 
@@ -963,7 +970,7 @@ flowchart TD
 - **In:** `product_expanded`
 - **Out:** `product_release`
 - **Math:**
-  - keep COMID, width, depth and interval bounds; round to the millimeter
+  - keep reach ID, width, depth and interval bounds; round to the millimeter; name columns as in the 2024 release
 
 #### Notebook cache (`notebook_cache`)
 

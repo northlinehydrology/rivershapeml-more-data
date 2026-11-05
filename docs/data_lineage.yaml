@@ -374,19 +374,22 @@ tables:
 
   targets:
     chapter: C
-    title: Targets (bankfull width and depth per site)
+    title: Targets (bankfull and in-channel width and depth per site)
     path: data/derived/retrain_targets.csv
     grain: one gage
     key: [site_no]
     source: {script: src/build_targets.py}
     columns:
-      q2: "ft3/s; 2-year flood"
-      n_peaks: "count; annual peaks"
+      q2: "ft3/s; 2-year flood (median annual peak, water years 2000+)"
+      q_in: "ft3/s; in-channel flow (smallest annual peak, water years 2000+)"
+      n_peaks: "count; annual peaks, water years 2000+"
       tw_all: "ft; bankfull width, all measurements (null if filtered out)"
       td_all: "ft; bankfull mean depth, all measurements"
       tw_hs: "ft; bankfull width, HYDRoSWOT only"
-      se_all / se_d_all / se_hs: "log units; standard error of the log target at Q2"
-      ext_all / ext_d_all / ext_hs: "-; Q2 / largest measured flow"
+      td_hs: "ft; bankfull mean depth, USGS records of the HYDRoSWOT visits"
+      tw_in_all / td_in_all / tw_in_hs / td_in_hs: "ft; the same four targets at the in-channel flow (kept only if below bankfull)"
+      se_all / se_d_all / se_hs / se_d_hs, se_tw_in_all ...: "log units; standard error of the log target at the evaluation flow"
+      ext_all / ext_d_all / ext_hs / ext_d_hs, ext_tw_in_all ...: "-; extrapolation factor beyond the measured flow range"
       r2_all / r2_d_all / r2_hs: "-; R2 around the curve (paper's rule, recorded only)"
       tw_all_exp / td_all_exp: "-; fitted exponents b, f"
       dropped_inverse_depth: "bool; site dropped because depth falls as flow rises"
@@ -510,8 +513,8 @@ tables:
     source: {script: src/predict_product.py}
     columns:
       tw_bf_m / y_bf_m: "m; bankfull width / depth"
-      tw_bf_m_p05 / tw_bf_m_p95: "m; 90% prediction interval for width"
-      y_bf_m_p05 / y_bf_m_p95: "m; 90% prediction interval for depth"
+      tw_in_m / y_in_m: "m; in-channel width / depth (capped at the bankfull value)"
+      "*_p05 / *_p95": "m; 90% prediction interval for each"
       da_bin: "text; drainage-area class used for the interval"
       streamorde: "-; stream order"
 
@@ -540,14 +543,14 @@ tables:
   product_release:
     chapter: F
     title: Release file, ML-derived channel width and depth (expanded-set retrain)
-    path: data/derived/release/rivershapeml_expanded_set_v1.parquet
+    path: data/derived/release/rivershapeml_expanded_set_v2.parquet
     grain: one reach
-    key: [comid]
+    key: [hf_id]
     source: {script: src/export_product.py}
     columns:
-      comid: "integer; NHDPlusV2 COMID"
-      tw_bf_m, tw_bf_m_p05, tw_bf_m_p95: "m; bankfull width and its 90% prediction interval (NaN where drainage area is zero or missing)"
-      y_bf_m, y_bf_m_p05, y_bf_m_p95: "m; bankfull mean depth and its 90% prediction interval"
+      hf_id, hf_source: "integer reach ID (= NHDPlusV2 COMID) and 'reference_fabric', as in the 2024 release"
+      y_bf(m), y_inchan(m), tw_bf(m), tw_inchan(m): "m; bankfull and in-channel depth and width (names as in the 2024 release)"
+      "*_p05(m) / *_p95(m)": "m; 90% prediction interval for each (NaN where drainage area is zero or missing)"
 
   measurement_cache:
     chapter: F
@@ -609,18 +612,21 @@ operations:
     inputs: [usgs_peaks]
     outputs: [targets]
     math:
+      - "annual peaks: water years >= 2000; drop LESSTHAN, GREATERTHAN, DAMFAILURE; one (the largest) per water year"
       - "Q2 = median(annual peaks) if >= 10 peaks (the median annual flood = 2-year flood on the annual-maximum basis)"
+      - "Q_in = min(annual peaks): the 1-year (always exceeded) flood, RiverShapeML's in-channel convention"
   read_and_filter:
     chapter: C
-    title: Read at Q2 and filter
+    title: Read at Q2 and Q_in, and filter
     script: src/build_targets.py (curve_stats)
     inputs: [ahg_fits, ahg_input]
     outputs: [targets]
     math:
-      - "W_bf = a Q2^b; D_bf = c Q2^f (SI), stored in ft (/ 0.3048)"
+      - "W_bf = a Q2^b; D_bf = c Q2^f; W_in = a Q_in^b; D_in = c Q_in^f (SI), stored in ft (/ 0.3048)"
       - "r = ln(v) - ln(curve); trim |r - median r| > 3 x 1.4826 MAD"
       - "SE = s sqrt(1/n + (ln Q2 - mean ln Q)^2 / sum (ln Q - mean ln Q)^2), s = sqrt(sum r^2 / (n - 2))"
-      - "keep if n >= 5, SE <= 0.2, Q2 / max Q <= 3; drop the site if f < 0"
+      - "keep if n >= 5, SE <= 0.2, extrapolation <= 3x (Q / max Q and min Q / Q); drop the site if f < 0"
+      - "in-channel targets kept only if smaller than the bankfull target"
   # D
   match_hydroswot:
     chapter: D
@@ -666,7 +672,8 @@ operations:
     outputs: [riverml_runs]
     math:
       - "5 folds grouped by COMID x 3 repeats; XGBRegressor with MODEL_PARAMS (regularized, early-stopped deployed settings)"
-      - "A: existing sites, tw_hs; B1: existing, tw_all; B2: existing + new, tw_all; all scored on the same held-out sites"
+      - "A: existing sites, HYDRoSWOT targets; B1: existing, all-measurement targets; B2: existing + new; all scored on the same held-out sites"
+      - "run for TW_bf, Y_bf, TW_in, Y_in (in-channel models use the bankfull models' inputs and settings)"
   train_valid_test:
     chapter: E
     title: Train / validation / test
@@ -720,7 +727,7 @@ operations:
     inputs: [product_expanded]
     outputs: [product_release]
     math:
-      - "keep COMID, width, depth and interval bounds; round to the millimeter"
+      - "keep reach ID, width, depth and interval bounds; round to the millimeter; name columns as in the 2024 release"
   notebook_cache:
     chapter: F
     title: Notebook cache

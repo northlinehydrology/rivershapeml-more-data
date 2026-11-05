@@ -23,8 +23,10 @@ def main():
     ours = pd.read_parquet(DER / "product_ours.parquet").set_index("FEATUREID")
     ours = ours[[c for c in ours.columns if c.startswith(("tw_", "y_"))]].add_prefix("ours_")
     dep = pd.read_parquet(DER / "product_baseline.parquet").set_index("FEATUREID").add_prefix("deployed_")
-    hs = (pd.read_parquet(RAW / "rivershapeml/ml_channel_dimension.parquet").groupby("hf_id")[["tw_bf(m)", "y_bf(m)"]]
-          .median().rename(columns={"tw_bf(m)": "hydroshare_tw_bf_m", "y_bf(m)": "hydroshare_y_bf_m"}))
+    hs = (pd.read_parquet(RAW / "rivershapeml/ml_channel_dimension.parquet")
+          .groupby("hf_id")[["tw_bf(m)", "y_bf(m)", "tw_inchan(m)", "y_inchan(m)"]].median()
+          .rename(columns={"tw_bf(m)": "hydroshare_tw_bf_m", "y_bf(m)": "hydroshare_y_bf_m",
+                           "tw_inchan(m)": "hydroshare_tw_in_m", "y_inchan(m)": "hydroshare_y_in_m"}))
     bg = pd.read_csv(RAW / "bieger/BANKFULL_CONUS.txt").replace(-9999, np.nan).set_index("COMID")
     bg = bg[["BANKFULL_WIDTH", "BANKFULL_DEPTH"]].rename(columns={"BANKFULL_WIDTH": "bieger_tw_bf_m",
                                                                   "BANKFULL_DEPTH": "bieger_y_bf_m"})

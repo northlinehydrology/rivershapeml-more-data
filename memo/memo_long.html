@@ -17,30 +17,35 @@ figcaption { font-size: 8.5pt; color: #555; }
 code { font-size: 9pt; }
 h2, h3 { break-after: avoid; }
 table, li { break-inside: avoid; }
-</style></head><body><h1>Adding USGS channel measurements to RiverShapeML</h1>
-<p><em>More gage sites, better-constrained targets, and a re-predicted national product with prediction intervals</em></p>
-<p><em>Andrew Sommerlot · andrewsommerlot@gmail.com · October 2026 · long form</em></p>
+</style></head><body><style>td:not(:first-child) { white-space: nowrap; }</style>
+
+<h1>Adding USGS channel measurements to RiverShapeML</h1>
+<p><em>More gage sites, better-constrained targets, and a re-predicted national product, bankfull and in-channel, with prediction intervals</em></p>
+<p><em>Andrew Sommerlot · andrewsommerlot@gmail.com · November 2026 · long form</em></p>
 <h2>Summary</h2>
-<p>RiverShapeML (Modaresi Rad et al., 2024) learns bankfull width and depth from gage measurements and
-predicts them for all 2.65 million NHDPlus reaches in CONUS. Its training data come from HYDRoSWOT, which
-holds acoustic Doppler (ADCP) measurements through 2014. USGS now publishes every channel measurement it
-makes, by every method (wading, bridge, cableway, boat), through the Water Data OGC API: 4.77 million
-records. I rebuilt the training targets from those records using the RiverShapeML and AHGestimation
+<p>RiverShapeML (Modaresi Rad et al., 2024) learns bankfull and in-channel width and depth from gage
+measurements and predicts them for all 2.65 million NHDPlus reaches in CONUS. Its training data come from
+HYDRoSWOT, which holds acoustic Doppler (ADCP) measurements through 2014. USGS now publishes every channel
+measurement it makes, by every method (wading, bridge, cableway, boat), through the Water Data OGC API: 4.77
+million records. I rebuilt the training targets from those records using the RiverShapeML and AHGestimation
 conventions, kept the model, features and deployment pipeline unchanged, and asked one question: <strong>does the
 added data improve the model where it is weakest?</strong></p>
 <ul>
 <li><strong>More training sites, especially in small streams.</strong> Bankfull-width training sites rise from 4,375
-  to 6,928 (+58%). Sites under 10 km² rise from 66 to 111, and sites of 10–100 km² from 596 to 1,157.</li>
+  to 7,221 (+65%). Sites under 10 km² rise from 66 to 125, and sites of 10–100 km² from 596 to 1,274.
+  In-channel targets follow the same pattern.</li>
 <li><strong>The added measurements are sound.</strong> At the same sites, bankfull widths from all measurements and from
   HYDRoSWOT alone agree at the median (ratio 1.00); depths measured the same way agree within 0.1–2.4%.</li>
 <li><strong>Held-out error falls in every size class, most in small streams.</strong> Against the same model trained on
-  the existing RiverShapeML data, median absolute error in bankfull width falls from 78% to 41% for sites
-  under 10 km² (bias +67% → +5%), and from 25% to 22% overall; depth improves similarly. The gain comes
-  from the new sites: at existing sites, judged on the original HYDRoSWOT targets, the two models match.</li>
-<li><strong>A re-predicted national product with 90% prediction intervals.</strong> The retrained model was run through
-  the NOAA-OWP deployment pipeline for every reach, with split-conformal intervals by drainage-area class.
-  It sits closer to the Bieger et al. (2015) regional curves in headwaters and removes most physically
-  implausible values.</li>
+  the existing RiverShapeML data, median absolute error in bankfull width falls from 78% to 37% for sites
+  under 10 km² (bias +65% → +7%), and from 26% to 23% overall. The largest gain is in in-channel depth,
+  where the added wading measurements are densest: 99% → 33% under 10 km², and 31% → 24% overall. The gain
+  comes from the new sites: at existing sites, judged on the original HYDRoSWOT targets, the two models
+  match for all four quantities.</li>
+<li><strong>A re-predicted national product with 90% prediction intervals.</strong> The retrained models were run through
+  the NOAA-OWP deployment pipeline for every reach, for bankfull and in-channel width and depth, with
+  split-conformal intervals by drainage-area class. Bankfull sits closer to the Bieger et al. (2015)
+  regional curves in headwaters and removes most physically implausible values.</li>
 </ul>
 <p>The work builds directly on Arash Modaresi Rad's RiverShapeML and the public
 <a href="https://github.com/NOAA-OWP/predict-riverML">NOAA-OWP/predict-riverML</a> pipeline, and uses Mike Johnson's
@@ -68,30 +73,40 @@ run.</em></p>
 of the USGS Water Data OGC API (4,772,063 records), with site metadata and annual peaks from the
 <code>monitoring-locations</code> and <code>peaks</code> collections. Gages were linked to NHDPlus reaches with the NLDI; existing
 RiverShapeML sites keep their published COMIDs. Candidate new sites are CONUS gages with at least 5
-measurements since 2000 and at least 10 years of daily flow (4,501 sites; 3,192 linked to a reach).</p>
+measurements since 2000 and at least 10 years of daily flow (4,501 sites; 4,317 linked to a reach). For the
+linked new sites, the reach's drainage area matches the gage's at a median ratio of 1.01, with 91% within 25%.</p>
+<p><strong>Target flows.</strong> Each site's annual peaks are taken from water year 2000 onward, matching the measurement
+period. Peaks flagged as below or above a reported value, or caused by a dam failure, are dropped, and each
+water year keeps one peak; at least 10 peaks are required. Bankfull is read at the 2-year flood, Q₂, the
+median of the annual peaks, which is the 2-year flood by definition on an annual-maximum basis (England et
+al., 2019; Institute of Hydrology, 1999); it agrees with RiverShapeML's bankfull flows at the 4,875 shared
+sites (median ratio 1.01; 62% within 10%). In-channel is read at the 1-year flood, Q_in, the smallest annual
+peak in the same window: a flow the channel reaches every year of the record.</p>
 <p><strong>Targets.</strong> For each site, width, mean depth (area / width) and velocity were converted to SI units and
 screened with RiverShapeML's sanity rules (width &lt; 4 km, depth &lt; 65 m, Q ≤ 1.1 × maximum annual peak).
 Hydraulic geometry was then fit with AHGestimation (<code>mad_filter</code> → <code>qva_filter</code> → <code>ahg_estimate</code>), which
-fits W = aQ^b, D = cQ^f and V = kQ^m jointly under continuity, and each curve was evaluated at the 2-year
-flood, Q₂. I took Q₂ as the median of the annual peak series, which is the 2-year flood by definition on an
-annual-maximum basis (England et al., 2019; Institute of Hydrology, 1999); it agrees with RiverShapeML's
-bankfull flows at the 4,315 shared sites (median ratio 1.02). The target is y = ln(1 + W_bf) with W_bf in meters, as in
-RiverShapeML, and likewise for depth. Sites where depth decreases with flow (f &lt; 0) were dropped (53 sites).</p>
+fits W = aQ^b, D = cQ^f and V = kQ^m jointly under continuity, and each curve was evaluated at Q₂ and Q_in.
+The target is y = ln(1 + W) with W in meters, as in RiverShapeML, and likewise for depth. Sites where depth
+decreases with flow (f &lt; 0) were dropped (48 sites), and an in-channel target is kept only where it is below
+the site's bankfull target.</p>
 <p><strong>Target filter.</strong> RiverShapeML keeps sites whose width–discharge fit has R² ≥ 0.6. Many well-measured
-sites fail that test because width barely changes with flow, not because the target is uncertain: 3,636 of
-the 6,928 width targets here would fail it, with a median standard error of 0.040 on the log target. I
-replaced it with a precision filter: standard error of the log target at Q₂ ≤ 0.2, Q₂ ≤ 3 × the largest
-measured flow (limits extrapolation), and at least 5 measurements.</p>
+sites fail that test because width barely changes with flow, not because the target is uncertain: 3,799 of
+the 7,221 bankfull width targets here would fail it, with a median standard error of 0.036 on the log target. I
+replaced it with a precision filter: standard error of the log target ≤ 0.2, the target flow no more than
+3 × beyond the measured flow range at either end (limits extrapolation), and at least 5 measurements.</p>
 <p><strong>Model.</strong> Features, feature engineering, missing-value handling and inference follow predict-riverML exactly
 (30 features from <code>ml_inputs.parquet</code>). I first reproduced the deployed models' national predictions: on
 the same reaches, the published output statistics match to six decimals (e.g., minimum and maximum width
 1.813823 m and 14,114.583008 m; median 18.43 m). For retraining I kept their XGBoost
 learning rate and sampling settings but chose tree depth, minimum child weight and number of trees by a
 regularization sweep with early stopping on a reach-grouped 70/15/15 split (depth 6, min_child_weight 5,
-about 2,450 trees). This matched the deployed settings' held-out accuracy with roughly a quarter of the
-trees and much less fit to the training data (test log R² 0.84 for width, 0.76 for depth). All runs below
-use the same settings, so only the training data differ.</p>
-<p><strong>Experiment.</strong> One comparison, with everything but the training data held fixed:</p>
+about 2,450 trees). This matches the deployed settings' held-out accuracy with roughly a quarter of the
+trees and much less fit to the training data (test log R² 0.82 for width and 0.77 for depth, against 0.82
+and 0.76 for the deployed settings). The in-channel models use the same settings as their bankfull
+counterparts. Rerunning the sweep on the final targets ranks a few other settings marginally higher, within
+1% in validation error, so the settings were kept fixed and all runs below use them; only the training data
+differ.</p>
+<p><strong>Experiment.</strong> One comparison per quantity, with everything but the training data held fixed:</p>
 <table>
 <thead>
 <tr>
@@ -117,13 +132,14 @@ use the same settings, so only the training data differ.</p>
 the all-measurement targets, which rest on about ten times more measurements per site. Because A never
 trained on those targets, existing sites are also scored against the HYDRoSWOT-only targets (the same-target
 check). HYDRoSWOT records maximum rather than mean depth, so A's depth target uses mean depth from the USGS
-records of the same HYDRoSWOT visits (97% match by date and discharge). Error is reported as
-ln(predicted / observed), summarized as median absolute error (%), median bias (%), share of sites within a
-factor of 2, and R² in log space.</p>
-<p><strong>Prediction intervals.</strong> The B2 model was refit on all sites and applied to every reach through the
-deployment pipeline. Split-conformal 90% prediction intervals (Lei et al., 2018) were computed per
-drainage-area class from held-out residuals. Coverage was then checked on sites unseen by both the model and
-the calibration (0.88–0.90 across classes).</p>
+records of the same HYDRoSWOT visits (96% match by date and discharge). Both runs read their curves at the
+same Q₂ and Q_in. Error is reported as ln(predicted / observed), summarized as median absolute error (%),
+median bias (%), share of sites within a factor of 2, and R² in log space.</p>
+<p><strong>Prediction intervals.</strong> The B2 models were refit on all sites and applied to every reach through the
+deployment pipeline. Where the in-channel prediction came out above bankfull it was capped at bankfull (6.8%
+of reaches for width, 1.3% for depth). Split-conformal 90% prediction intervals (Lei et al., 2018) were
+computed per drainage-area class from held-out residuals. Coverage was then checked on sites unseen by both
+the model and the calibration (0.88–0.90 across classes, for all four quantities).</p>
 <h2>3. Results</h2>
 <h3>More sites, concentrated in small drainages</h3>
 <table>
@@ -140,118 +156,175 @@ the calibration (0.88–0.90 across classes).</p>
 <tr>
 <td>&lt; 10</td>
 <td style="text-align: right;">66</td>
-<td style="text-align: right;">38</td>
-<td style="text-align: right;">73</td>
-<td style="text-align: right;">111</td>
+<td style="text-align: right;">36</td>
+<td style="text-align: right;">89</td>
+<td style="text-align: right;">125</td>
 </tr>
 <tr>
 <td>10–100</td>
 <td style="text-align: right;">596</td>
-<td style="text-align: right;">560</td>
-<td style="text-align: right;">597</td>
-<td style="text-align: right;">1,157</td>
+<td style="text-align: right;">549</td>
+<td style="text-align: right;">725</td>
+<td style="text-align: right;">1,274</td>
 </tr>
 <tr>
 <td>100–1,000</td>
 <td style="text-align: right;">1,766</td>
-<td style="text-align: right;">1,919</td>
-<td style="text-align: right;">876</td>
-<td style="text-align: right;">2,795</td>
+<td style="text-align: right;">1,881</td>
+<td style="text-align: right;">1,048</td>
+<td style="text-align: right;">2,929</td>
 </tr>
 <tr>
 <td>1,000–10,000</td>
 <td style="text-align: right;">1,395</td>
-<td style="text-align: right;">1,620</td>
-<td style="text-align: right;">465</td>
-<td style="text-align: right;">2,085</td>
+<td style="text-align: right;">1,596</td>
+<td style="text-align: right;">527</td>
+<td style="text-align: right;">2,123</td>
 </tr>
 <tr>
 <td>&gt; 10,000</td>
 <td style="text-align: right;">485</td>
-<td style="text-align: right;">577</td>
-<td style="text-align: right;">193</td>
-<td style="text-align: right;">770</td>
+<td style="text-align: right;">564</td>
+<td style="text-align: right;">190</td>
+<td style="text-align: right;">754</td>
 </tr>
 <tr>
 <td><strong>Total</strong></td>
 <td style="text-align: right;"><strong>4,375</strong></td>
-<td style="text-align: right;"><strong>4,719</strong></td>
-<td style="text-align: right;"><strong>2,209</strong></td>
-<td style="text-align: right;"><strong>6,928</strong></td>
+<td style="text-align: right;"><strong>4,637</strong></td>
+<td style="text-align: right;"><strong>2,584</strong></td>
+<td style="text-align: right;"><strong>7,221</strong></td>
 </tr>
 </tbody>
 </table>
-<p>Totals include 10 sites with a zero or missing drainage area. Depth targets follow the same pattern (7,017 sites). The
-gain is largest relative to need: 58% of NHDPlus reaches drain less than 10 km², and those reaches were
-represented by 66 training sites.</p>
+<p>Bankfull width targets. Totals include 16 sites with a zero or missing drainage area. Bankfull depth targets
+follow the same pattern (7,295 sites), as do in-channel width (7,040) and depth (7,275). The gain is largest
+relative to need: 58% of NHDPlus reaches drain less than 10 km², and those reaches were represented by 66
+training sites.</p>
 <h3>The added measurements are consistent with HYDRoSWOT</h3>
-<p>Across all target sites, 97% of HYDRoSWOT measurements since 2000 match a record in the USGS collection
-(within one day, discharge within 3%; 147,074 of 152,100), and in a 300-site sample a typical site has 13
+<p>Across all target sites, 96% of HYDRoSWOT measurements since 2000 match a record in the USGS collection
+(within one day, discharge within 3%; 149,811 of 155,852), and in a 300-site sample a typical site has 13
 HYDRoSWOT measurements against 142 in total. For width, the
 curve fit to the added measurements matches the HYDRoSWOT curve over shared flows at the median (+0.6%; 62%
-of sites within ±10%), and across 3,666 existing sites the bankfull width targets from all measurements and
-from HYDRoSWOT alone agree at the median (ratio 0.996). For depth, where the same deployment type appears in
+of sites within ±10%), and across 3,634 existing sites the bankfull width targets from all measurements and
+from HYDRoSWOT alone agree at the median (ratio 0.997). For depth, where the same deployment type appears in
 both, depths agree closely (bridge +0.1%, boat +2.4%, cableway +1.0%). Wading sections are about 33% shallower
 than bridge sections at the same flows, because they are taken at different cross sections; this is a
 location difference rather than a measurement error, and the per-site fit pools both. Repeat-measurement
-scatter sets a noise floor of 8–15% for width and 14–19% for depth. The joint AHG fit changes the median width target by less than 1% relative to a plain
-log-log fit but corrects poorly conditioned sites (e.g., Walnut Creek: 28.1 m → 19.0 m).</p>
+scatter sets a noise floor of 8–15% for width and 14–19% for depth.</p>
 <h3>Held-out error falls in every size class, most in small streams</h3>
 <p><img alt="" src="fig_errors.png" /></p>
 <p><em>Figure 2. Held-out median absolute error and median bias by drainage-area class: the same model trained
-on the existing RiverShapeML data (A) and on the expanded training set (B2). Same settings, same held-out
-sites.</em></p>
+on the existing RiverShapeML data (A) and on the expanded training set (B2), for bankfull and in-channel width
+and depth. Same settings, same held-out sites.</em></p>
 <table>
 <thead>
 <tr>
-<th></th>
-<th>Width: A → B2</th>
-<th>Depth: A → B2</th>
+<th>A → B2</th>
+<th>Bankfull width</th>
+<th>Bankfull depth</th>
+<th>In-channel width</th>
+<th>In-channel depth</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Median absolute error, all sites</td>
-<td>25.4% → 22.4%</td>
-<td>23.8% → 20.9%</td>
+<td>25.9% → 22.9%</td>
+<td>24.9% → 21.2%</td>
+<td>23.5% → 21.0%</td>
+<td>31.2% → 23.8%</td>
 </tr>
 <tr>
 <td>Median absolute error, &lt; 10 km²</td>
-<td>78% → 41%</td>
-<td>72% → 32%</td>
+<td>78% → 37%</td>
+<td>82% → 33%</td>
+<td>77% → 39%</td>
+<td>99% → 33%</td>
+</tr>
+<tr>
+<td>Median absolute error, 10–100 km²</td>
+<td>30% → 25%</td>
+<td>42% → 25%</td>
+<td>30% → 22%</td>
+<td>53% → 26%</td>
 </tr>
 <tr>
 <td>Median bias, &lt; 10 km²</td>
-<td>+67% → +5%</td>
-<td>+72% → +7%</td>
+<td>+65% → +7%</td>
+<td>+82% → +12%</td>
+<td>+73% → +5%</td>
+<td>+99% → +11%</td>
 </tr>
 <tr>
 <td>Within a factor of 2, all sites</td>
-<td>89% → 92%</td>
-<td>89% → 94%</td>
+<td>88% → 92%</td>
+<td>87% → 93%</td>
+<td>88% → 91%</td>
+<td>82% → 91%</td>
 </tr>
 <tr>
 <td>Log R², all sites</td>
-<td>0.77 → 0.82</td>
-<td>0.66 → 0.76</td>
+<td>0.76 → 0.82</td>
+<td>0.65 → 0.78</td>
+<td>0.74 → 0.83</td>
+<td>0.53 → 0.76</td>
+</tr>
+<tr>
+<td>Held-out sites</td>
+<td>7,209</td>
+<td>7,284</td>
+<td>7,028</td>
+<td>7,264</td>
 </tr>
 </tbody>
 </table>
 <p>The model trained on the existing data overpredicts small streams because it has almost no small streams to
-learn from; the new sites remove most of that bias. Gains are smaller in larger basins.</p>
+learn from; the new sites remove most of that bias. Gains are smaller in larger basins. In-channel depth
+improves the most, in every size class (log R² 0.53 → 0.76), which is where the added wading measurements
+change the targets most.</p>
 <p><strong>Where the gain comes from.</strong> At sites outside RiverShapeML's training set, the closest proxy here for an
-unseen reach, median absolute error falls from 32% to 26% for width and from 38% to 25% for depth. At
-existing sites, judged on the HYDRoSWOT-only targets (the same-target check), the two models match: width
-20.4% (A) vs 19.6% (B2), depth 18.2% vs 18.2%. Scored on the all-measurement targets, A also looks worse at
-existing sites (21.4% vs 19.7% for width), but most of that difference reflects the change in target
+unseen reach, median absolute error falls from 32% to 26% for bankfull width, 42% to 25% for bankfull depth,
+32% to 25% for in-channel width and 56% to 28% for in-channel depth. At existing sites, judged on the
+HYDRoSWOT-only targets (the same-target check), the two models match:</p>
+<table>
+<thead>
+<tr>
+<th>Existing sites, HYDRoSWOT-only targets</th>
+<th>Bankfull width</th>
+<th>Bankfull depth</th>
+<th>In-channel width</th>
+<th>In-channel depth</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Median absolute error, A → B2</td>
+<td>20.5% → 20.1%</td>
+<td>18.4% → 18.4%</td>
+<td>17.9% → 17.5%</td>
+<td>20.9% → 20.7%</td>
+</tr>
+<tr>
+<td>Sites</td>
+<td>3,398</td>
+<td>3,420</td>
+<td>3,224</td>
+<td>3,316</td>
+</tr>
+</tbody>
+</table>
+<p>Scored on the all-measurement targets, A also looks worse at existing sites (23.0% vs 21.4% for bankfull
+width, 24.3% vs 21.9% for in-channel depth), but most of that difference reflects the change in target
 definition rather than a better model, so I do not count it as a gain. The improvement comes from the new
 sites, and the expanded model gives up nothing on the original problem. For context, repeat-measurement
 scatter means no model can do much better than about 10–15% median error on width.</p>
 <h3>A re-predicted national product</h3>
 <p><img alt="" src="fig_product.png" /></p>
-<p><em>Figure 3. Median bankfull width (left) and depth (right) by drainage area across all CONUS reaches for the
-current model (predict-riverML), the 2024 HydroShare release, the expanded-set retrain with its 90% prediction
-interval, and the Bieger et al. (2015) regional curves. The shaded region holds 44% of reaches.</em></p>
+<p><em>Figure 3. Median bankfull (top) and in-channel (bottom) width and depth by drainage area across all CONUS
+reaches for the current model (predict-riverML, bankfull only), the 2024 HydroShare release, the expanded-set
+retrain with its 90% prediction interval, and the Bieger et al. (2015) regional curves (bankfull only). The
+shaded region holds 44% of reaches.</em></p>
 <table>
 <thead>
 <tr>
@@ -276,7 +349,7 @@ interval, and the Bieger et al. (2015) regional curves. The shaded region holds 
 </tr>
 <tr>
 <td>Width halves going downstream</td>
-<td style="text-align: right;">2.2%</td>
+<td style="text-align: right;">2.4%</td>
 <td style="text-align: right;">3.6%</td>
 <td style="text-align: right;">5.3%</td>
 </tr>
@@ -294,59 +367,68 @@ interval, and the Bieger et al. (2015) regional curves. The shaded region holds 
 </tr>
 <tr>
 <td>Median ratio to Bieger width</td>
-<td style="text-align: right;">1.80</td>
+<td style="text-align: right;">1.74</td>
 <td style="text-align: right;">2.88</td>
 <td style="text-align: right;">3.28</td>
 </tr>
 </tbody>
 </table>
-<p>Between 100 and 10,000 km² the three ML products agree closely (median widths within about 10%). Above
-10,000 km² the current model runs wider (median 152 m, against 122 m for the retrain and 110 m for the 2024
-release), and all curves wobble there because few reaches fall in each bin and large rivers of different
-character (e.g., the Colorado and the Missouri) share them. Below 10 km² they diverge: median widths are
-9.1 m (expanded-set retrain), 17.6 m (current model), 26.5 m (2024 release) and 3.5 m (Bieger). Downstream
-scaling moves toward the regional curves, and implausibly wide reaches nearly disappear.</p>
-<p>Depth tells the same story in small streams. Below 10 km² median depths are 0.72 m (expanded-set retrain),
-0.93 m (current model), 1.63 m (2024 release) and 0.36 m (Bieger). The 2024 release is nearly flat in depth
-from the smallest reaches to about 1,000 km² (median 1.5 m), which is the exponent of 0.00 in the table.
-Between 1,000 and 10,000 km² the retrain and the current model run deeper than both the 2024 release and
-Bieger (median 2.5 m against 1.7–1.8 m), so the depth improvement is concentrated in small streams. In both
-panels the Bieger curve rises again below about 0.3 km²; each regional equation is monotone, so this
-probably reflects which regions those very small reaches fall in. Because most reaches are small, the national median width falls from 18.4 m (current model) to
-10.9 m; this is the largest practical change for users of the product. The prediction intervals widen where
-data are thin: for width they span roughly 0.50–1.9× the prediction above 10 km² and 0.36–4.2× below it.
-Below 10 km² they rest on about 110 calibration sites, and gaged small streams are not typical of NHDPlus
-headwaters, so they should be read as indicative there.</p>
-<p>The Silverway reach illustrates both the improvement and its limit. The retrain predicts 15.8 m wide and
-0.99 m deep (current model 14.8 m / 1.29 m; 2024 release 19.6 m / 1.51 m). The Silverway site itself is
-not in the expanded training set: its Q₂ (2,700 cfs, 76 m³/s) is 5.2 times the largest measured flow, so
-its target would be an extrapolation and the filter excludes it.</p>
+<p>Bankfull values. Between 100 and 10,000 km² the three ML products agree closely (median widths within about
+10%). Above 10,000 km² the current model runs wider (median 152 m, against 115 m for the retrain and 110 m for
+the 2024 release), and all curves wobble there because few reaches fall in each bin and large rivers of
+different character (e.g., the Colorado and the Missouri) share them. Below 10 km² they diverge: median widths
+are 9.0 m (expanded-set retrain), 17.6 m (current model), 26.5 m (2024 release) and 3.5 m (Bieger).
+Downstream scaling moves toward the regional curves, and implausibly wide reaches nearly disappear.</p>
+<p>Depth tells the same story in small streams. Below 10 km² median bankfull depths are 0.70 m (expanded-set
+retrain), 0.93 m (current model), 1.63 m (2024 release) and 0.36 m (Bieger). The 2024 release is nearly flat
+in depth from the smallest reaches to about 1,000 km² (median 1.5 m), which is the exponent of 0.00 in the
+table. Between 1,000 and 10,000 km² the retrain and the current model run deeper than both the 2024 release
+and Bieger (median 2.4 m against 1.7–1.8 m), so the depth improvement is concentrated in small streams. In
+both panels the Bieger curve rises again below about 0.3 km²; each regional equation is monotone, so this
+probably reflects which regions those very small reaches fall in. Because most reaches are small, the
+national median bankfull width falls from 18.4 m (current model) to 10.7 m; this is the largest practical
+change for users of the product. The prediction intervals widen where data are thin: for bankfull width they
+span roughly 0.5–2× the prediction above 10 km² and 0.37–3.7× below it. Below 10 km² they rest on about 125
+calibration sites, and gaged small streams are not typical of NHDPlus headwaters, so they should be read as
+indicative there.</p>
+<p><strong>In-channel.</strong> The current deployed model has no in-channel output, so the comparison is with the 2024
+release. Above about 1,000 km² the two agree (median in-channel width 41 m vs 45 m at 1,000–10,000 km², 94 m
+vs 97 m above 10,000 km²; depths match). Below that the retrain is much smaller: median in-channel width 7.0
+m against 22.6 m under 10 km², and depth 0.48 m against 1.25 m. Across all reaches, the retrain's in-channel
+width is 75% of its bankfull width at the median and its in-channel depth 67% of bankfull depth; in the 2024
+release the ratios are 92% and 81%. The difference mixes data and definition: the in-channel flow here is
+the smallest annual peak since 2000, which need not be the flow the 2024 release used, so the two products
+should be compared with that in mind. In-channel intervals are similar in width to bankfull (0.35–3.7× for
+width under 10 km²).</p>
+<p>The Silverway reach illustrates both the improvement and its limit. The retrain predicts a bankfull channel
+12.2 m wide and 1.02 m deep (current model 14.8 m / 1.29 m; 2024 release 19.6 m / 1.51 m), and an in-channel
+7.4 m wide and 0.45 m deep (2024 release 17.7 m / 1.40 m). The Silverway site itself is not in the expanded
+training set: its Q₂ (2,700 cfs, 76 m³/s) is 5.2 times the largest measured flow, so its bankfull target would
+be an extrapolation and the filter excludes it, and its in-channel target goes with it.</p>
 <h2>4. Discussion and limitations</h2>
-<p><strong>The headwater gap is narrower but not closed.</strong> Below about 5 km² there are still only ~50 training sites
+<p><strong>The headwater gap is narrower but not closed.</strong> Below about 5 km² there are still only ~55 training sites
 for 1.16 million reaches. Tree ensembles cannot extrapolate beyond the range of their training targets, so
 predictions flatten (and in all three products bend upward) at the smallest drainage areas rather than
-continuing the downstream trend. The ratio to Bieger widths remains 1.8 overall. Part of that gap is
+continuing the downstream trend. The ratio to Bieger widths remains 1.7 overall. Part of that gap is
 definitional: Bieger's field bankfull indicators and a Q₂-based target are not the same quantity, and the
 Q₂ convention may overstate bankfull flow in small, flashy basins.</p>
 <p><strong>Gaged is not ungaged.</strong> All accuracy figures are for reaches with gages, which skew toward larger rivers
 than the network as a whole. The conformal intervals inherit that assumption: they are calibrated
 on gaged sites and are exchangeable only to the extent that ungaged reaches resemble them.</p>
-<p><strong>Some useful data remain unused.</strong> About 1,300 candidate gages did not link to a reach through the NLDI, and
-about 7,000 sites have five or more measurements but less than 10 years of daily flow. The latter could
-use National Water Model flood frequencies; RiverShapeML's training code already has an NWM
-flood-frequency option, used there in place of gage floods at the same sites. Most of these sites are small
-streams (985 under 10 km² and 2,159 at 10–100 km², of those with a known drainage area). In an exploratory
-check at 7,403 gaged reaches, the NWM 2-year flood ran about 20% below the gage value at the median, and
-about 50% below under 10 km², where the two barely correlate (squared correlation of logs 0.72 overall,
-0.03 for the 137 small sites). That argues for bringing these sites in with lower weight or a flag, and for
-checking the NWM flows first.</p>
+<p><strong>Some useful data remain unused.</strong> About 7,000 sites have five or more measurements but less than 10 years
+of daily flow. They could use National Water Model flood frequencies; RiverShapeML's training code already
+has an NWM flood-frequency option, used there in place of gage floods at the same sites. Most of these sites
+are small streams (985 under 10 km² and 2,159 at 10–100 km², of those with a known drainage area). In an
+exploratory check at 7,403 gaged reaches, the NWM 2-year flood ran about 20% below the gage value at the
+median, and about 50% below under 10 km², where the two barely correlate (squared correlation of logs 0.72
+overall, 0.03 for the 137 small sites). That argues for bringing these sites in with lower weight or a flag,
+and for checking the NWM flows first. Only 184 candidate gages remain without a reach link.</p>
 <p><strong>Simplifications to revisit.</strong> Three choices here are deliberately simple and worth tightening. (i) Where
-USGS records a split-flow measurement as one row per channel, the rows are treated as separate points; this
-affects a minority of sites (about 620 of 6,928 with more than 10% of rows split). (ii) Q₂ uses each gage's full peak record,
-which often starts decades before the 2000+ measurements, and regulated peaks are kept; both runs share Q₂, so
-the comparison is unaffected, but absolute target levels are. (iii) Cross-validation holds out whole reaches,
-not whole basins, so neighbouring gages on the same river can sit on either side of a split; a basin-blocked
-check would be a useful robustness test.</p>
+USGS records a split-flow measurement as one row per channel, the rows are treated as separate points, as in
+HYDRoSWOT and RiverShapeML; this affects a minority of sites (about 9% had more than 10% of rows split in the v1.0 target set). (ii)
+Regulated peaks are kept in the peak series. (iii) Cross-validation holds out whole reaches, not whole basins,
+so neighbouring gages on the same river can sit on either side of a split; a basin-blocked check would be a
+useful robustness test.</p>
 <p><strong>Two observations I could not resolve from the public record.</strong> The current deployed models and the 2024
 HydroShare release differ more than I expected: the squared correlation between their log widths is 0.36. Separately, 932 of
 the 2.65 million reach IDs in the HydroShare file appear more than once (66,341 rows in total). The repeat
@@ -355,21 +437,21 @@ these IDs carry two distinct predictions, so they may be two features sharing an
 copies. For the comparison here each was collapsed to its median; with 932 reaches the effect is
 negligible. Both points are noted as questions, not findings. Relatedly, the training-target files in the
 RiverShapeML research repository sit 1.6–1.9 times below the deployed models' predictions at the same sites,
-while the targets built here match the deployed scale (ratio 1.0 for depth, 1.13 for width). That suggests
-the deployed models were trained on a later target set than the one in the repository.</p>
+while the targets built here sit much closer to the deployed scale (the deployed predictions are 1.06× the
+depth targets and 1.18× the width targets at existing sites). That suggests the deployed models were trained
+on a later target set than the one in the repository.</p>
 <h2>5. Questions and possible next steps</h2>
 <p>These are starting points. Some may already have been considered.</p>
 <ol>
 <li><strong>What was the original motivation for training on HYDRoSWOT?</strong> For example, a single, consistent
    measurement method. The agreement statistics above suggest the other methods can be added with little
    risk.</li>
+<li><strong>Which in-channel flow do users need?</strong> The added measurements change in-channel geometry the most, so
+   the choice of in-channel flow matters most there; flood-mapping users may have a specific one in mind.</li>
 <li><strong>Headwater behavior.</strong> Monotone constraints on drainage area and discharge, or blending with regional
    curves below a threshold, would keep predictions on a physically sensible trend where data are sparse.</li>
-<li><strong>More sites.</strong> Recover the unlinked gages, and use RiverShapeML's NWM flood-frequency option to bring in
-   the ~7,000 short-record sites, mostly small streams.</li>
-<li><strong>In-channel geometry.</strong> The same measurements support targets at lower flows, where the added wading
-   measurements are densest. This is the natural next experiment and maps directly onto the existing
-   in-channel model.</li>
+<li><strong>More sites.</strong> Use RiverShapeML's NWM flood-frequency option to bring in the ~7,000 short-record sites,
+   mostly small streams.</li>
 <li><strong>Training settings.</strong> Early stopping and modest regularization reach the same accuracy with about a
    quarter of the trees, which shortens training and inference.</li>
 <li><strong>Release housekeeping.</strong> An updated HydroShare release could carry prediction intervals and resolve
@@ -379,8 +461,10 @@ the deployed models were trained on a later target set than the one in the repos
 <p>Repository: <a href="https://github.com/northlinehydrology/rivershapeml-more-data">github.com/northlinehydrology/rivershapeml-more-data</a>. It contains every script, a single <code>run_all.sh</code> that rebuilds all
 results from public sources, a checked data-lineage record, and an interactive notebook (marimo) for
 exploring sites, targets, runs and the national product. The re-predicted product ("ML-derived channel width
-and depth, expanded-set retrain", with 90% prediction intervals for every reach) is attached to the
-repository's <a href="https://github.com/northlinehydrology/rivershapeml-more-data/releases/tag/v1.0">v1.0 release</a> as a 38 MB Parquet file, and is regenerated by the pipeline.</p>
+and depth, expanded-set retrain": bankfull and in-channel width and depth, with 90% prediction intervals for
+every reach, in the column names of the 2024 HydroShare release) is attached to the repository's
+<a href="https://github.com/northlinehydrology/rivershapeml-more-data/releases/tag/v2.0">v2.0 release</a> as a Parquet
+file, and is regenerated by the pipeline. The bankfull-only <a href="https://github.com/northlinehydrology/rivershapeml-more-data/releases/tag/v1.0">v1.0 release</a> remains available.</p>
 <h2>Acknowledgments</h2>
 <p>This work stands on Arash Modaresi Rad's RiverShapeML research and the NOAA Office of Water Prediction's
 open <a href="https://github.com/NOAA-OWP/predict-riverML">predict-riverML</a> deployment pipeline, whose published

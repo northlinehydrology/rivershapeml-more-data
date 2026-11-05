@@ -2,7 +2,8 @@
 comparison to the deployed RiverShapeML model and the 2024 HydroShare release.
 
 1. Final models: their 30 features + MODEL_PARAMS (regularized, early-stopped settings), trained on ALL sites with targets (variant B2),
-   for bankfull width (TW_bf) and depth (Y_bf); predict every reach in ml_inputs.parquet.
+   for bankfull width and depth (TW_bf, Y_bf) and in-channel width and depth (TW_in, Y_in); predict every reach in
+   ml_inputs.parquet. In-channel values are capped at the reach's bankfull value.
 2. Uncertainty: 90% prediction intervals from held-out errors by drainage-area class (split-conformal, by class):
    interval = prediction x [P5, P95] of held-out ratio target/prediction in that class, from the
    retrain_riverml B2 runs. Coverage is checked on unseen sites (bounds set on half the sites, tested on the other).
@@ -11,7 +12,7 @@ comparison to the deployed RiverShapeML model and the 2024 HydroShare release.
    the same river (levelpath), width ~ drainage-area scaling, extremes.
 4. Comparison: quantiles overall / by drainage area / by stream order; reach-level ratios.
 
-Usage: python src/predict_product.py   (after predict_baseline.py and retrain_riverml.py for both targets)
+Usage: python src/predict_product.py   (after predict_baseline.py and retrain_riverml.py for all four targets)
 Output: data/derived/product_ours.parquet, data/derived/product_checks.txt
 """
 from pathlib import Path
@@ -71,7 +72,11 @@ def downstream_drops(w, enhd):
 
 
 def main():
-    out = pd.DataFrame({"tw_bf_m": train_and_predict("TW_bf", "tw_all"), "y_bf_m": train_and_predict("Y_bf", "td_all")})
+    out = pd.DataFrame({"tw_bf_m": train_and_predict("TW_bf", "tw_all"), "y_bf_m": train_and_predict("Y_bf", "td_all"),
+                        "tw_in_m": train_and_predict("TW_in", "tw_in_all"), "y_in_m": train_and_predict("Y_in", "td_in_all")})
+    capped = {c: float((out[c] > out[c.replace("_in_", "_bf_")]).mean()) for c in ["tw_in_m", "y_in_m"]}
+    for c in ["tw_in_m", "y_in_m"]:
+        out[c] = np.minimum(out[c], out[c.replace("_in_", "_bf_")])
     out.index.name = ID
     enhd = pd.read_parquet(RAW / "enhd/enhd_nhdplusatts.parquet",
                            columns=["comid", "tocomid", "levelpathi", "totdasqkm", "streamorde"])
@@ -84,7 +89,8 @@ def main():
         lines.append(" ".join(str(x) for x in a))
         print(*a, flush=True)
 
-    for target, col in [("TW_bf", "tw_bf_m"), ("Y_bf", "y_bf_m")]:
+    log(f"in-channel predictions above bankfull, capped: width {capped['tw_in_m']:.2%}, depth {capped['y_in_m']:.2%}")
+    for target, col in [("TW_bf", "tw_bf_m"), ("Y_bf", "y_bf_m"), ("TW_in", "tw_in_m"), ("Y_in", "y_in_m")]:
         b = conformal_bounds(target)
         log(f"\n== 90% prediction-interval factors by drainage area, {target} (ln-ratio P5/P95 -> multiplicative)")
         log(pd.DataFrame({"lower_x": np.exp(b.lo), "upper_x": np.exp(b.hi), "coverage_check": b.coverage_check}).round(3).to_string())
@@ -94,8 +100,8 @@ def main():
 
     base = pd.read_parquet(DER / "product_baseline.parquet").set_index(ID)
     pub = (pd.read_parquet(RAW / "rivershapeml/ml_channel_dimension.parquet")
-           .groupby("hf_id")[["tw_bf(m)", "y_bf(m)"]].median()
-           .rename(columns={"tw_bf(m)": "tw_bf_m", "y_bf(m)": "y_bf_m"}))
+           .groupby("hf_id")[["tw_bf(m)", "y_bf(m)", "tw_inchan(m)", "y_inchan(m)"]].median()
+           .rename(columns={"tw_bf(m)": "tw_bf_m", "y_bf(m)": "y_bf_m", "tw_inchan(m)": "tw_in_m", "y_inchan(m)": "y_in_m"}))
     products = {"ours": out, "deployed": base, "hydroshare_2024": pub}
 
     log("\n== Reasonableness checks")
@@ -126,8 +132,20 @@ def main():
             r = (out[col] / products[other][col].reindex(out.index)).dropna()
             log(f"   ours / {other}: median {r.median():.3f}, IQR [{r.quantile(.25):.2f}, {r.quantile(.75):.2f}], "
                 f"log R² {np.corrcoef(np.log(out[col].reindex(r.index)), np.log(products[other][col].reindex(r.index)))[0, 1] ** 2:.3f}")
+    log("\n== In-channel (expanded-set retrain vs 2024 release; the current model has no in-channel output)")
+    log("note: in-channel flow definitions differ (here: smallest annual peak, water years 2000+), so differences mix data and definition")
+    inch = {"ours": out, "hydroshare_2024": pub}
+    for col in ["tw_in_m", "y_in_m"]:
+        q = pd.DataFrame({n: p[col].quantile([.05, .25, .5, .75, .95]) for n, p in inch.items()}).T.round(2)
+        log(f"-- {col}\n{q.to_string()}")
+        g = pd.DataFrame({n: p[col].groupby(out.da_bin.reindex(p.index)).median() for n, p in inch.items()}).round(2)
+        log(f"-- {col} median by drainage area\n{g.reindex(LABELS).to_string()}")
+        for n, p in inch.items():
+            bf = col.replace("_in_", "_bf_")
+            log(f"   {n}: in-channel / bankfull median {(p[col] / p[bf]).median():.3f}")
     for name, p in products.items():
-        log(f"Silverway (5781223) {name}: width {p.tw_bf_m.get(5781223, np.nan):.1f} m, depth {p.y_bf_m.get(5781223, np.nan):.2f} m")
+        log(f"Silverway (5781223) {name}: width {p.tw_bf_m.get(5781223, np.nan):.1f} m, depth {p.y_bf_m.get(5781223, np.nan):.2f} m"
+            + (f"; in-channel {p.tw_in_m.get(5781223, np.nan):.1f} m / {p.y_in_m.get(5781223, np.nan):.2f} m" if "tw_in_m" in p else ""))
     (DER / "product_checks.txt").write_text("\n".join(lines) + "\n")
 
 

@@ -8,7 +8,7 @@ Variants (all scored on the same held-out sites, folds grouped by COMID):
   B2  + new sites     : B1 plus new sites
 Targets are converted to meters and modeled as log1p(m), as their models are. Errors are ln(pred / target).
 
-Usage: python src/retrain_riverml.py --target TW_bf|Y_bf [--seeds 3] [--name RUN]
+Usage: python src/retrain_riverml.py --target TW_bf|Y_bf|TW_in|Y_in [--seeds 3] [--name RUN]
 Output: data/derived/runs/<name>/{config.json, predictions.parquet, summary.txt}  (same layout as retrain_experiment.py)
 """
 import argparse
@@ -21,19 +21,20 @@ from sklearn.model_selection import GroupKFold
 from xgboost import XGBRegressor
 
 from metrics import summarize
-from riverml_pipeline import MODEL_PARAMS, load_features
+from riverml_pipeline import MODEL_PARAMS, N_JOBS, load_features
 
 DER = Path(__file__).resolve().parents[1] / "data/derived"
 RAW = Path(__file__).resolve().parents[1] / "data/raw"
 FT = 0.3048
 N_FOLDS = 5
 BINS, LABELS = [0, 10, 100, 1000, 1e4, 1e7], ["<10", "10-100", "100-1k", "1k-10k", ">10k"]
-TARGET_COLS = {"TW_bf": ("tw_all", "tw_hs"), "Y_bf": ("td_all", "td_hs")}
+TARGET_COLS = {"TW_bf": ("tw_all", "tw_hs"), "Y_bf": ("td_all", "td_hs"),
+               "TW_in": ("tw_in_all", "tw_in_hs"), "Y_in": ("td_in_all", "td_in_hs")}
 pd.set_option("display.width", 200)
 
 
 def model(target, seed):
-    return XGBRegressor(**{**MODEL_PARAMS[target], "random_state": seed}, tree_method="hist", n_jobs=-1)
+    return XGBRegressor(**{**MODEL_PARAMS[target], "random_state": seed}, tree_method="hist", n_jobs=N_JOBS)
 
 
 def main(target="TW_bf", n_seeds=3, name=None):
@@ -106,7 +107,7 @@ def main(target="TW_bf", n_seeds=3, name=None):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--target", choices=["TW_bf", "Y_bf"], default="TW_bf")
+    ap.add_argument("--target", choices=list(TARGET_COLS), default="TW_bf")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--name")
     a = ap.parse_args()

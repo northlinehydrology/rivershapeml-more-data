@@ -50,7 +50,7 @@ def _(mo):
     | **Current model** | RiverShapeML as deployed by NOAA OWP ([NOAA-OWP/predict-riverML](https://github.com/NOAA-OWP/predict-riverML)), run on its published inputs |
     | **2024 release** | RiverShapeML outputs published on HydroShare in 2024 (an earlier model generation; the version history between it and the current model isn't public) |
     | **Expanded-set retrain** | the current model's features and settings, retrained on the expanded training set |
-    | **ML-derived channel width and depth, expanded-set retrain** | the expanded-set retrain's predictions: bankfull width and depth with 90% prediction intervals for ~2.65M NHDPlus reaches. "ML-derived channel width and depth" is the RiverShapeML product's published name (HydroShare); the current model and the 2024 release are versions of it |
+    | **ML-derived channel width and depth, expanded-set retrain** | the expanded-set retrain's predictions: bankfull and in-channel width and depth with 90% prediction intervals for ~2.65M NHDPlus reaches. "ML-derived channel width and depth" is the RiverShapeML product's published name (HydroShare); the current model and the 2024 release are versions of it |
     | **Bieger regional curve** | Bieger et al. (2015) field-based regional equations for bankfull width and depth, applied per reach by USGS |
     """)
     return
@@ -591,7 +591,8 @@ def _(DER, np, pd):
 
 @app.cell
 def _(mo):
-    dim_pick = mo.ui.dropdown({"Bankfull width (m)": "tw_bf_m", "Bankfull depth (m)": "y_bf_m"},
+    dim_pick = mo.ui.dropdown({"Bankfull width (m)": "tw_bf_m", "Bankfull depth (m)": "y_bf_m",
+                               "In-channel width (m)": "tw_in_m", "In-channel depth (m)": "y_in_m"},
                               value="Bankfull width (m)", label="Quantity")
     dim_pick
     return (dim_pick,)
@@ -602,11 +603,13 @@ def _(C1, C2, C3, PRODUCTS, alt, dim_pick, mo, pd, prod):
     _v = dim_pick.value
     _g = prod.groupby("da_mid", observed=True)
     _lines = pd.concat([pd.DataFrame({"da": _g[f"{k}_{_v}"].median().index, "value": _g[f"{k}_{_v}"].median().values,
-                                      "product": name, "reaches": _g.size().values}) for k, name in PRODUCTS.items()])
+                                      "product": name, "reaches": _g.size().values}) for k, name in PRODUCTS.items()
+                        if f"{k}_{_v}" in prod])
     _band = pd.DataFrame({"da": _g[f"ours_{_v}_p05"].median().index, "lo": _g[f"ours_{_v}_p05"].median().values,
                           "hi": _g[f"ours_{_v}_p95"].median().values})
     _bieger = pd.DataFrame({"da": _g[f"bieger_{_v}"].median().index, "value": _g[f"bieger_{_v}"].median().values,
-                            "product": "Bieger et al. 2015 (regional curve)"})
+                            "product": "Bieger et al. 2015 (regional curve)"}) if f"bieger_{_v}" in prod else \
+        pd.DataFrame(columns=["da", "value", "product"])
     _x = alt.X("da:Q", scale=alt.Scale(type="log"), title="Drainage area (km²)")
     _y = alt.Y("value:Q", scale=alt.Scale(type="log"), title=dim_pick.selected_key)
     _colors = alt.Scale(domain=list(PRODUCTS.values()), range=[C1, C2, C3])
@@ -629,6 +632,8 @@ def _(C1, C2, C3, PRODUCTS, alt, dim_pick, np, pd, prod):
     _edges = np.linspace(-1, 3.5, 46)
     _rows = []
     for _k, _name in {**PRODUCTS, "bieger": "Bieger et al. 2015 (regional curve)"}.items():
+        if f"{_k}_{_v}" not in prod:
+            continue
         _vals = np.log10(prod[f"{_k}_{_v}"].where(lambda s: s > 0).dropna())
         _h, _ = np.histogram(_vals, _edges)
         _rows.append(pd.DataFrame({"value": 10 ** ((_edges[:-1] + _edges[1:]) / 2), "share_%": 100 * _h / _h.sum(), "product": _name}))

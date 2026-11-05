@@ -1,7 +1,8 @@
 """Figures for the memo, from the pipeline outputs in data/derived/.
 
-  fig_errors.png  : held-out error and bias by drainage area, existing RiverShapeML data vs the expanded set (A vs B2)
-  fig_product.png : median bankfull width and depth vs drainage area for the four products, with the 90% prediction band
+  fig_errors.png  : held-out error and bias by drainage area for bankfull and in-channel width and depth,
+                    existing RiverShapeML data vs the expanded set (A vs B2)
+  fig_product.png : median bankfull and in-channel width and depth vs drainage area, with the 90% prediction band
 
 Usage: python memo/make_figures.py   (after ./run_all.sh)
 """
@@ -28,31 +29,37 @@ plt.rcParams.update({"font.family": "Helvetica Neue", "font.size": 9, "axes.edge
                      "legend.frameon": False, "savefig.dpi": 220})
 
 
+TARGETS = [("TW_bf", "Bankfull width"), ("Y_bf", "Bankfull depth"), ("TW_in", "In-channel width"), ("Y_in", "In-channel depth")]
+VAR = [("A_status_quo", BLUE, "Existing RiverShapeML data (A)"), ("B2_plus_new_sites", GREEN, "Expanded training set (B2)")]
+
+
 def fig_errors():
-    fig, axes = plt.subplots(2, 2, figsize=(7.2, 3.2), sharex=True)
+    fig, axes = plt.subplots(2, 4, figsize=(7.2, 3.4), sharex=True, sharey="row")
     x = np.arange(len(LABELS))
-    for row, (target, name) in enumerate([("TW_bf", "Bankfull width"), ("Y_bf", "Bankfull depth")]):
+    for col, (target, name) in enumerate(TARGETS):
         p = pd.read_parquet(DER / f"runs/riverml_{target}/predictions.parquet")
-        s = summarize(p[p.variant.isin(["A_status_quo", "B2_plus_new_sites"])], ["da_bin"])
+        s = summarize(p[p.variant.isin([v for v, *_ in VAR])], ["da_bin"])
         s["da_bin"] = s.da_bin.astype(str)
-        for col, (metric, title) in enumerate([("median_abs_err_%", "Median absolute error (%)"),
-                                               ("bias_%", "Median bias (%)")]):
+        for row, metric in enumerate(["median_abs_err_%", "bias_%"]):
             ax = axes[row, col]
-            for k, (v, color, lab) in enumerate([("A_status_quo", BLUE, "Existing RiverShapeML data (A)"),
-                                                 ("B2_plus_new_sites", GREEN, "Expanded training set (B2)")]):
+            for k, (v, color, lab) in enumerate(VAR):
                 vals = s[s.variant == v].set_index("da_bin").reindex(LABELS)[metric].to_numpy()
-                bars = ax.bar(x + (k - 0.5) * 0.36, vals, 0.34, color=color, label=lab, edgecolor="white", linewidth=1)
-                ax.bar_label(bars, labels=[f"{abs(v):.0f}" if abs(v) < 0.5 else f"{v:.0f}" for v in vals],
-                             fontsize=7, color=MUTED, padding=1.5)
+                bars = ax.bar(x + (k - 0.5) * 0.38, vals, 0.36, color=color, label=lab, edgecolor="white", linewidth=0.8)
+                for xi, val in zip(x + (k - 0.5) * 0.38, vals):
+                    ax.text(xi, max(val, 0) + 2, f"{round(val):.0f}".replace("-0", "0"), ha="center", va="bottom",
+                            fontsize=5.5, color=MUTED)
             ax.axhline(0, color=MUTED, linewidth=0.8)
-            ax.set_title(f"{name}: {title.lower()}", fontsize=9, color=INK, loc="left")
-            ax.set_xticks(x, [f"{l}" for l in LABELS])
+            ax.set_xticks(x, ["<10", "10–\n100", "100–\n1k", "1k–\n10k", ">10k"], fontsize=6.5)
+            if row == 0:
+                ax.set_title(name, fontsize=8.5, color=INK, loc="left")
             if row == 1:
-                ax.set_xlabel("Drainage area (km²)")
-    axes[0, 0].legend(loc="upper right", fontsize=8)
-    fig.tight_layout()
-    fig.savefig(MEMO / "fig_errors.png")
-    plt.close(fig)
+                ax.set_xlabel("Drainage area (km²)", fontsize=7.5)
+        axes[0, 0].set_ylabel("Median abs. error (%)", fontsize=7.5)
+        axes[1, 0].set_ylabel("Median bias (%)", fontsize=7.5)
+    h, l = axes[0, 0].get_legend_handles_labels()
+    fig.legend(h, l, loc="lower center", ncol=2, fontsize=7, bbox_to_anchor=(0.5, 0))
+    fig.tight_layout(rect=(0, 0.06, 1, 1), w_pad=0.4)
+    fig.savefig(MEMO / "fig_errors.png"); plt.close(fig)
 
 
 def fig_product():
@@ -62,32 +69,32 @@ def fig_product():
     g = prod.groupby("bin", observed=True)
     mid = np.array([np.sqrt(iv.left * iv.right) for iv in g.size().index])
     keep = g.size().to_numpy() >= 50
-    fig, axes = plt.subplots(1, 2, figsize=(7.2, 2.75))
-    for ax, (v, ylabel, ylim) in zip(axes, [("tw", "Median bankfull width (m)", (1, 1500)),
-                                            ("y", "Median bankfull depth (m)", (0.1, 30))]):
-        ax.axvspan(0.1, 5, color="#f1efe8", zorder=0)
-        ax.text(0.13, ylim[1] * 0.75, "44% of reaches;\n~50 training sites", fontsize=6.5, color=MUTED, va="top")
-        lo = g[f"ours_{v}_bf_m_p05"].median().to_numpy()[keep]
-        hi = g[f"ours_{v}_bf_m_p95"].median().to_numpy()[keep]
-        ax.fill_between(mid[keep], lo, hi, color=GREEN, alpha=0.15, linewidth=0,
-                        label="90% prediction interval (expanded-set retrain)")
-        for col, color, lab in [("deployed", BLUE, "Current model"), ("hydroshare", ORANGE, "2024 release"),
-                                ("ours", GREEN, "Expanded-set retrain")]:
-            ax.plot(mid[keep], g[f"{col}_{v}_bf_m"].median().to_numpy()[keep], color=color, linewidth=1.8, label=lab)
-        ax.plot(mid[keep], g[f"bieger_{v}_bf_m"].median().to_numpy()[keep], color=MUTED, linewidth=1.4,
-                linestyle=(0, (4, 3)), label="Bieger et al. (2015) regional curve")
-        ax.set_xscale("log")
-        ax.set_yscale("log")
-        ax.set_xlim(0.1, 3e6)
-        ax.set_ylim(*ylim)
-        ax.set_xlabel("Drainage area (km²)")
-        ax.set_ylabel(ylabel)
-        ax.grid(True, which="major", axis="both", color=GRID, linewidth=0.6)
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=3, fontsize=7, bbox_to_anchor=(0.5, 0))
-    fig.tight_layout(rect=(0, 0.1, 1, 1))
-    fig.savefig(MEMO / "fig_product.png")
-    plt.close(fig)
+    med = lambda c: g[c].median().to_numpy()[keep]
+    fig, axes = plt.subplots(2, 2, figsize=(7.2, 4.6), sharex=True)
+    for r, (kind, kname) in enumerate([("bf", "Bankfull"), ("in", "In-channel")]):
+        for c, (v, unit, ylim) in enumerate([("tw", "width", (1, 1500)), ("y", "depth", (0.05, 30))]):
+            ax = axes[r, c]
+            ax.axvspan(0.1, 5, color="#f1efe8", zorder=0)
+            ax.fill_between(mid[keep], med(f"ours_{v}_{kind}_m_p05"), med(f"ours_{v}_{kind}_m_p95"), color=GREEN,
+                            alpha=0.15, linewidth=0, label="90% prediction interval (expanded-set retrain)")
+            lines = [("hydroshare", ORANGE, "2024 release"), ("ours", GREEN, "Expanded-set retrain")]
+            if kind == "bf":
+                lines.insert(0, ("deployed", BLUE, "Current model"))
+            for src, color, lab in lines:
+                ax.plot(mid[keep], med(f"{src}_{v}_{kind}_m"), color=color, linewidth=1.6, label=lab)
+            if kind == "bf":
+                ax.plot(mid[keep], med(f"bieger_{v}_bf_m"), color=MUTED, linewidth=1.3, linestyle=(0, (4, 3)),
+                        label="Bieger et al. (2015) regional curve")
+            ax.set_xscale("log"); ax.set_yscale("log"); ax.set_xlim(0.1, 3e6); ax.set_ylim(*ylim)
+            ax.set_title(f"{kname} {unit}", fontsize=8.5, color=INK, loc="left")
+            ax.set_ylabel(f"Median {unit} (m)", fontsize=7.5)
+            ax.grid(True, which="major", axis="both", color=GRID, linewidth=0.6)
+            if r == 1:
+                ax.set_xlabel("Drainage area (km²)")
+    h, l = axes[0, 0].get_legend_handles_labels()
+    fig.legend(h, l, loc="lower center", ncol=3, fontsize=7, bbox_to_anchor=(0.5, 0))
+    fig.tight_layout(rect=(0, 0.07, 1, 1))
+    fig.savefig(MEMO / "fig_product.png"); plt.close(fig)
 
 
 if __name__ == "__main__":

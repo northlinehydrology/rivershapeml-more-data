@@ -9,6 +9,7 @@ Inputs: data/raw/predict-riverML/ (ml_inputs.parquet, model_space/, models/), se
     width_m = predict(model, X)
 """
 import json
+import os
 import pickle
 import warnings
 from pathlib import Path
@@ -18,6 +19,7 @@ import pandas as pd
 from pyproj import Transformer
 
 ROOT = Path(__file__).resolve().parents[1]
+N_JOBS = int(os.environ.get("RIVERML_THREADS", "-1"))  # threads for XGBoost and the R fits; -1 = all cores
 RML = ROOT / "data/raw/predict-riverML"
 ID = "FEATUREID"
 # settings used for all models trained here: regularized and early-stopped versions of the deployed settings,
@@ -26,6 +28,10 @@ MODEL_PARAMS = {"TW_bf": dict(n_estimators=2478, learning_rate=0.01, max_depth=6
                               subsample=0.8, colsample_bytree=0.7, random_state=42),
                 "Y_bf": dict(n_estimators=2416, learning_rate=0.01, max_depth=6, min_child_weight=5, reg_lambda=1,
                              subsample=0.8, colsample_bytree=0.7, random_state=42)}
+# in-channel models: the deployment pipeline publishes bankfull models only, so in-channel width and depth use the
+# inputs (feature list, missing-value fills) and settings of their bankfull counterparts
+BASE_TARGET = {"TW_in": "TW_bf", "Y_in": "Y_bf"}
+MODEL_PARAMS.update({k: MODEL_PARAMS[v] for k, v in BASE_TARGET.items()})
 # hyperparameters of their deployed "update" models (read from the pickled XGBRegressor); used only for reference
 # and as the starting point of the regularization sweep
 THEIR_PARAMS = {"TW_bf": dict(n_estimators=9765, learning_rate=0.01, max_depth=9, subsample=0.8,
@@ -35,6 +41,7 @@ THEIR_PARAMS = {"TW_bf": dict(n_estimators=9765, learning_rate=0.01, max_depth=9
 
 
 def feature_list(target):
+    target = BASE_TARGET.get(target, target)
     return json.loads((RML / f"model_space/final_model_features_{target}.json").read_text())
 
 
@@ -67,12 +74,12 @@ RAW_COLS = ["FEATUREID", "nwm_max", "slope", "bf_ff", "TotDASqKM", "LAI", "RckDe
 
 
 def load_features(target, ids=None):
-    """Model-ready features for `target` ('TW_bf' or 'Y_bf'); optionally only reaches in `ids`."""
+    """Model-ready features for `target` ('TW_bf', 'Y_bf', 'TW_in' or 'Y_in'); optionally only reaches in `ids`."""
     df = pd.read_parquet(RML / "data/ml_inputs.parquet", columns=RAW_COLS)
     if ids is not None:
         df = df[df[ID].isin(set(ids))]
     df = df.reset_index(drop=True)
-    med = pd.read_parquet(RML / f"model_space/metrics/median_imput_{target}.parquet")["Median"].to_dict()
+    med = pd.read_parquet(RML / f"model_space/metrics/median_imput_{BASE_TARGET.get(target, target)}.parquet")["Median"].to_dict()
     df = df.fillna(value={k: v for k, v in med.items() if k in df})
     df = engineer(df)
     feats = feature_list(target)
