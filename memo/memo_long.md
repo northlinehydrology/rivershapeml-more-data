@@ -260,9 +260,9 @@ These are starting points. Some may already have been considered.
    curves below a threshold, would keep predictions on a physically sensible trend where data are sparse.
 3. **More sites.** Recover the unlinked gages, and use RiverShapeML's NWM flood-frequency option to bring in
    the ~7,000 short-record sites, mostly small streams.
-4. **In-channel geometry.** The same measurements support targets at lower flows (in-channel flow is about
-   6% of bankfull flow at the median), and these sites are far better sampled there than at Q₂. This is the
-   natural next experiment and maps directly onto the existing in-channel model.
+4. **In-channel geometry.** The same measurements support targets at lower flows, where the added wading
+   measurements are densest. This is the natural next experiment and maps directly onto the existing
+   in-channel model.
 5. **Training settings.** Early stopping and modest regularization reach the same accuracy with about a
    quarter of the trees, which shortens training and inference.
 6. **Release housekeeping.** An updated HydroShare release could carry prediction intervals and resolve

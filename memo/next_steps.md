@@ -12,8 +12,8 @@ Follow-ups the analysis points to, roughly in order of expected value.
 
 
 2. **In-channel targets and models.** Repeat the full process (targets, retrain, re-predict, compare) for
-   in-channel width and depth. The in-channel flow (RiverShapeML's 100%-annual-exceedance flood, a median ~6% of the
-   2-year flood) sits where wading measurements are densest, so the added data should help most there. The current
+   in-channel width and depth. The in-channel flow (the 1-year flood, exceeded every year)
+   sits where wading measurements are densest, so the added data should help most there. The current
    deployed model is bankfull-only, but OWP flood mapping uses in-channel values.
 
 ## Other candidates
